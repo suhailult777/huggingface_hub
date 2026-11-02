@@ -11341,8 +11341,10 @@ class HfApi:
             watched (`list[WebhookWatchedItem]`, optional):
                 List of items to watch. It can be users, orgs, models, datasets, or spaces.
                 Refer to [`WebhookWatchedItem`] for more details. Watched items can also be provided as plain dictionaries.
+                If not provided, the current watched items are kept.
             domains (`list[Literal["repo", "discussion"]]`, optional):
-                The domains to watch. This can include "repo", "discussion", or both.
+                The domains to watch. This can include "repo", "discussion", or both. If not provided, the current
+                domains are kept.
             secret (`str`, optional):
                 A secret to sign the payload with, providing an additional layer of security.
             secrets (`dict[str, str]`, optional):
@@ -11378,24 +11380,31 @@ class HfApi:
                 disabled=False,
             ```
         """
-        if watched is None:
-            watched = []
-        watched_dicts = [asdict(item) if isinstance(item, WebhookWatchedItem) else item for item in watched]
-
-        update_json: dict = {"watched": watched_dicts}
         if url is not None and job_id is not None:
             raise ValueError("Set `url` or `job_id` but not both.")
+        if secrets is not None and job_id is None:
+            raise ValueError("`secrets` can only be set together with `job_id`.")
+
+        # The Hub endpoint requires `watched`, `domains` and a target (`url` or a Job) on every update. Keep the
+        # current values for the ones that are not passed, so that callers only need to provide what they change.
+        if watched is None or domains is None or (url is None and job_id is None):
+            current = self.get_webhook(webhook_id, token=token)
+            if watched is None:
+                watched = list(current.watched)
+            if domains is None:
+                domains = current.domains
+            if url is None and job_id is None and current.url is not None:
+                url = current.url
+        watched_dicts = [asdict(item) if isinstance(item, WebhookWatchedItem) else item for item in watched]
+
+        update_json: dict = {"watched": watched_dicts, "domains": domains}
         if url is not None:
             update_json["url"] = url
         if job_id is not None:
             update_json["jobSourceId"] = job_id
-        if domains is not None:
-            update_json["domains"] = domains
         if secret is not None:
             update_json["secret"] = secret
         if secrets is not None:
-            if job_id is None:
-                raise ValueError("`secrets` can only be set together with `job_id`.")
             update_json["secrets"] = secrets
 
         response = get_session().post(

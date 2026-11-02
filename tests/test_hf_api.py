@@ -4330,6 +4330,30 @@ class TestWebhookApi:
         )
         assert updated_webhook.url == updated_url
 
+    def test_update_webhook_only_some_fields(self, api: HfApi) -> None:
+        # Regression test for https://github.com/huggingface/huggingface_hub/issues/5293
+        # Fields that are not passed (`url`, `watched`, `domains`) must keep their current value.
+        # Watch an existing user so that the stored `watched` list is not empty.
+        watched = [WebhookWatchedItem(type="user", name=USER)]
+        webhook = api.create_webhook(url=self.webhook_url, watched=watched, domains=["repo"])
+        try:
+            updated_url = "https://webhook.site/new"
+            updated = api.update_webhook(webhook.id, url=updated_url)
+            assert updated.url == updated_url
+            assert updated.watched == watched
+            assert updated.domains == ["repo"]
+
+            updated = api.update_webhook(webhook.id, secret="new-secret")
+            assert updated.url == updated_url  # the secret itself is not returned by the Hub
+            assert updated.watched == watched
+            assert updated.domains == ["repo"]
+
+            updated = api.update_webhook(webhook.id, domains=["repo", "discussion"])
+            assert updated.domains == ["repo", "discussion"]
+            assert updated.watched == watched
+        finally:
+            api.delete_webhook(webhook.id)
+
     def test_enable_webhook(self, api: HfApi) -> None:
         enabled_webhook = api.enable_webhook(self.webhook.id)
         assert not enabled_webhook.disabled
